@@ -15,7 +15,7 @@ config = {}  # Configuration
 orient = lcd.LANDSCAPE_FLIP  # Display orientation
 logger = None  # Logger object
 logger_name = 'SMM'  # Logger name
-ambient_client = None  # Ambient instance
+influxdbconfig=None
 max_retries = 30  # Maximum number of times to retry
 
 # Colormap (tab10)
@@ -158,7 +158,6 @@ def monthly_fee(fee):
     lcd.font(lcd.FONT_DefaultSmall)
     lcd.print('Yen', x + w - lcd.textWidth('Yen'), y + 25, uncolor)
 
-
 if __name__ == '__main__':
     try:
         # Initialize logger
@@ -175,7 +174,7 @@ if __name__ == '__main__':
         # Connecting Wi-Fi
         status('Connecting Wi-Fi')
         wifiCfg.autoConnect(lcdShow=False)
-        if not wifiCfg.isconnected():
+        if not wifiCfg.is_connected():
             raise Exception('Can not connect to WiFi.')
 
         # Start checking the WiFi connection
@@ -185,24 +184,13 @@ if __name__ == '__main__':
 
         # Set Time
         status('Set Time')
-        ntptime.settime()
+        ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
 
         # Load configuration
         status('Load configuration')
         config_file = '/flash/SmartMeter.json'
         with open(config_file) as f:
             config = ujson.load(f)
-        for key in [
-                'id', 'password', 'contract_amperage', 'collect_date',
-                'charge_func'
-        ]:
-            if key not in config:
-                raise Exception('{} is not defined in config.json'.format(key))
-        if 'ambient' in config:
-            for key in ['channel_id', 'write_key']:
-                if key not in config['ambient']:
-                    raise Exception(
-                        '{} is not defined in config.json'.format(key))
 
         # Create objects
         status('Create objects')
@@ -217,13 +205,10 @@ if __name__ == '__main__':
                     config['collect_date'])
         charge = eval('charge.{}'.format(config['charge_func']))
         logger.info('charge function: %s', charge.__name__)
-        if 'ambient' in config:
-            import ambient
-            ambient_client = ambient.Ambient(config['ambient']['channel_id'],
-                                             config['ambient']['write_key'])
-            logger.info('Ambient config: (%s, %s)',
-                        config['ambient']['channel_id'],
-                        config['ambient']['write_key'])
+
+        if "influxdb" in config:
+            import influxdb
+            influxdbconfig=config["influxdb"]
 
         # Connecting to Smart Meter
         status('Connecting SmartMeter')
@@ -233,7 +218,7 @@ if __name__ == '__main__':
 
         # Start monitoring
         status('Start monitoring')
-        amperage = power_kw = power_kwh = amount = 0
+        amperage = power_kw = power_kwh = amount = total_power_kwh = 0
         update = collect = 'YYYY-MM-DD hh:mm:ss'
         retries = 0
         t = 0
@@ -247,39 +232,45 @@ if __name__ == '__main__':
                     instantaneous_power(power_kw)
                     retries = 0
                 except Exception as e:
-                    logger.error(e)
+                    logger.error(str(e))
                     retries += 1
 
             # Updated every 60 seconds
             if t % 60 == 0:
                 try:
                     (collect, power_kwh) = bp35a1.monthly_power()
+                    (_, total_power_kwh) = bp35a1.total_power()
                     amount = charge(config['contract_amperage'], power_kwh)
                     collect_range(collect, update)
                     monthly_power(power_kwh)
                     monthly_fee(amount)
                     retries = 0
                 except Exception as e:
-                    logger.error(e)
+                    logger.error(str(e))
                     retries += 1
 
             # Send every 30 seconds
             if t % 30 == 0:
                 try:
-                    if ambient_client:
-                        result = ambient_client.send({
-                            'd1': amperage,
-                            'd2': power_kw,
-                            'd3': power_kwh,
-                            'd4': amount
-                        })
-                        if result.status_code != 200:
+                    if influxdbconfig:
+                        c=influxdb.InfluxDBClient(**influxdbconfig)
+                        m = {
+                            "amperage": amperage,
+                            "power_kw": power_kw,
+                            "power_kwh": power_kwh,
+                            "amount": amount,
+                            "total_power_kwh" : total_power_kwh
+                        }
+                        logger.info(str(m))
+                        result=c.write(point="smartmeter",measurement=m,tag={"host":"home"})
+
+                        if int(result.status_code) not in [200, 204]:
                             raise Exception(
-                                'ambient.send() failed. status: %s',
+                                'influxdb.write() failed. status: %s',
                                 result.status_code)
                         retries = 0
                 except Exception as e:
-                    logger.error(e)
+                    logger.error(str(e))
                     retries += 1
 
             # Ping every 1 hour

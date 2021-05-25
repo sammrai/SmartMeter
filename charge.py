@@ -94,5 +94,35 @@ def tokyo_gas_2(contract, power):
     return int(fee)
 
 
+def kansai_gas_nattoku(contract, power):
+    """
+    関西電力「なっトクでんき（なっトクパック）」での電気料金計算
+    https://kepco.jp/ryokin/menu/nattokudenki/
+
+    Parameters
+    ----------
+    contract : None
+        契約アンペア数 (本プランでは計算に使用しません)
+    power : float
+        前回検針後の使用電力量（kWh）
+
+    Returns
+    -------
+    fee: int
+        電気料金
+    """
+
+    fee = 0
+    if power <= 15:
+        return 285
+    elif 15 < power <= 120:
+        fee = 20.31
+    elif 120 < power <= 300:
+        fee = 24.10
+    elif 300 < power:
+        fee = 27.80
+
+    return int(fee*power)
+
 if __name__ == '__main__':
     print(tokyo_gas_1('50', 339))

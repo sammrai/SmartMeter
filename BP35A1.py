@@ -40,9 +40,9 @@ def skfunc(func):
 
 def propfunc(func):
     def wrapper(obj, *args, **kwds):
-        logger.info('%s: %s', func.__name__, args)
+        logger.info('%s: %s', func.__name__, str(args))
         response = func(obj, *args, **kwds)
-        logger.info('%s: %s', func.__name__, response)
+        logger.info('%s: %s', func.__name__, str(response))
         utime.sleep(0.5)
         return response
 
@@ -109,7 +109,7 @@ class BP35A1:
         logger = logging.getLogger(logger_name)
         self.progress = progress_func if progress_func else lambda _: None
 
-        self.uart = machine.UART(1, tx=0, rx=36)
+        self.uart = machine.UART(1, tx=0, rx=26)
         self.uart.init(115200, bits=8, parity=None, stop=1, timeout=2000)
 
         self.id = id
@@ -345,7 +345,7 @@ class BP35A1:
                 return (self.channel, self.pan_id, self.mac_addr, self.lqi)
 
             except Exception as e:
-                logger.error(e)
+                logger.error(str(e))
 
     def total_power(self):
         """
@@ -416,6 +416,11 @@ class BP35A1:
                 continue
 
             # 積算電力量係数
+            if esv == '52' and epc == 'D3':
+                # https://echonet.jp/wp/wp-content/uploads/pdf/General/Standard/Release/Release_H_jp/Appendix_H.pdf
+                # p314 (2) If the coefficient property is not implemented, treat the coefficient as 1.
+                power_coefficient = 1
+                return power_coefficient
             if esv == '72' and epc == 'D3':
                 power_coefficient = int(data[-8:], 16)
                 return power_coefficient
