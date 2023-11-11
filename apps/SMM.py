@@ -55,11 +55,19 @@ def checkWiFi():
     """
     WiFi接続チェック
     """
-    if not wifiCfg.isconnected():
-        logger.warn('Reconnect to WiFi')
-        if not wifiCfg.reconnect():
-            machine.reset()
+    logger.info("checking WiFi...")
+    wifi_retry_limit = 3  # WiFi再接続の試行回数
+    retry_count = 0
+    while not wifiCfg.isconnected() and retry_count < wifi_retry_limit:
+        logger.warn('Reconnecting to WiFi... Attempt %s', retry_count + 1)
+        wifiCfg.reconnect()
+        utime.sleep(10)  # 10秒待機
+        retry_count += 1
 
+    if not wifiCfg.isconnected():
+        logger.error('Failed to reconnect WiFi after %s attempts', wifi_retry_limit)
+        logger.info("Resetting machine...")
+        machine.reset()
 
 def status(message):
     """
@@ -210,8 +218,8 @@ if __name__ == '__main__':
             import influxdb
             influxdbconfig=config["influxdb"]
 
-        # Connecting to Smart Meter
-        status('Connecting SmartMeter')
+        # Connectizng to Smart Meter
+        status('Connecting SmartMeter5')
         (channel, pan_id, mac_addr, lqi) = bp35a1.open()
         logger.info('Connected. BP35A1 info: (%s, %s, %s, %s)', channel,
                     pan_id, mac_addr, lqi)
@@ -223,8 +231,10 @@ if __name__ == '__main__':
         retries = 0
         t = 0
         while retries < max_retries:
+            logger.info("polling: "+str(retries))
             # Updated every 10 seconds
             if t % 10 == 0:
+                logger.info("Updated every 10 seconds")
                 try:
                     (_, amperage) = bp35a1.instantaneous_amperage()
                     (update, power_kw) = bp35a1.instantaneous_power()
@@ -232,11 +242,12 @@ if __name__ == '__main__':
                     instantaneous_power(power_kw)
                     retries = 0
                 except Exception as e:
-                    logger.error(str(e))
+                    logger.error("e10: "+str(e))
                     retries += 1
 
             # Updated every 60 seconds
             if t % 60 == 0:
+                logger.info("Updated every 60 seconds")
                 try:
                     (collect, power_kwh) = bp35a1.monthly_power()
                     (_, total_power_kwh) = bp35a1.total_power()
@@ -246,11 +257,12 @@ if __name__ == '__main__':
                     monthly_fee(amount)
                     retries = 0
                 except Exception as e:
-                    logger.error(str(e))
+                    logger.error("e60: "+str(e))
                     retries += 1
 
             # Send every 30 seconds
             if t % 30 == 0:
+                logger.info("Send every 30 seconds")
                 try:
                     if influxdbconfig:
                         c=influxdb.InfluxDBClient(**influxdbconfig)
@@ -270,15 +282,19 @@ if __name__ == '__main__':
                                 result.status_code)
                         retries = 0
                 except Exception as e:
-                    logger.error(str(e))
+                    logger.error("e30: "+str(e))
                     retries += 1
 
             # Ping every 1 hour
             if t % 3600 == 0:
+                logger.info("Ping every 1 hour")
                 bp35a1.skPing()
 
             utime.sleep(1)
             t = utime.time()
-
+    except Exception as e:
+        logger.error("Exception: "+str(e))
     finally:
+        logger.error("Retries exceed max_retries"+str(retries)+", "+str(max_retries))
+        logger.info("Resetting machine...")
         machine.reset()
